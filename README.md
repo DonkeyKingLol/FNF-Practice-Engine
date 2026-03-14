@@ -1,3 +1,5 @@
+[Click here to play the game!](https://donkeykinglol.github.io/FNF-Practice-Engine/)
+
 # 🎤 FNF Practice Engine - Ultimate Edition 🎹
 
 Welcome to the **FNF Practice Engine**! Whether you're a rhythm game pro or just starting out, this tool is designed to help you master your timing and hit those "Sick!!" notes.
