@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>FNF Practice - Ultimate Edition</title>
+    <style>
+        body { background: #111; color: white; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; overflow: hidden; }
+        #game-container { position: relative; width: 400px; height: 600px; background: #000; border: 4px solid #FF69B4; border-radius: 12px; box-shadow: 0 0 30px rgba(255, 105, 180, 0.4); }
+        canvas { display: block; }
+        
+        .stats-container { display: flex; justify-content: space-between; width: 400px; font-size: 18px; color: #00FFFF; margin-bottom: 8px; font-weight: bold; }
+        #hp-bar-bg { width: 400px; height: 12px; background: #333; border-radius: 6px; margin-bottom: 15px; overflow: hidden; border: 1px solid #444; }
+        #hp-bar-fill { width: 50%; height: 100%; background: linear-gradient(to right, #FF1493, #00FFFF); transition: width 0.1s; }
+        
+        #judgment { position: absolute; top: 35%; width: 100%; text-align: center; font-size: 42px; font-weight: 900; pointer-events: none; text-shadow: 0 0 10px rgba(0,0,0,0.8); opacity: 0; transform: scale(0.5); transition: 0.1s; z-index: 5; }
+        #combo { position: absolute; top: 45%; width: 100%; text-align: center; font-size: 24px; color: #FFD700; pointer-events: none; opacity: 0; z-index: 5; }
+
+        #settings-menu { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.96); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 20; padding: 20px; box-sizing: border-box; }
+        .setting-row { display: flex; align-items: center; justify-content: space-between; width: 100%; margin: 6px 0; font-size: 14px; }
+        .key-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; width: 100%; margin-top: 10px; }
+        .key-input { background: #222; border: 1px solid #FF69B4; color: white; padding: 5px; border-radius: 4px; cursor: pointer; text-align: center; font-size: 11px; }
+        .key-input.active { border-color: #00FFFF; box-shadow: 0 0 8px #00FFFF; }
+        .ctrl-btn { background: #333; border: 1px solid #00FFFF; color: white; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
+        #settings-btn { margin-top: 15px; padding: 10px 20px; background: #FF69B4; border: none; border-radius: 6px; cursor: pointer; color: white; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="hp-bar-bg"><div id="hp-bar-fill"></div></div>
+    <div class="stats-container">
+        <div>Score: <span id="score">0</span></div>
+        <div>Acc: <span id="accuracy">100</span>%</div>
+        <div>Misses: <span id="misses">0</span></div>
+    </div>
+    
+    <div id="game-container">
+        <div id="judgment">SICK!!</div>
+        <div id="combo">0 COMBO</div>
+        <canvas id="fnfGame" width="400" height="600"></canvas>
+        
+        <div id="settings-menu">
+            <h2 style="color: #FF69B4; margin: 0 0 10px 0;">GAME SETTINGS</h2>
+            <div class="setting-row"><span>Scroll:</span><button id="scroll-toggle" class="ctrl-btn" onclick="toggleScroll()" style="width:120px">UPSCROLL</button></div>
+            <div class="setting-row"><span>Speed:</span><div><button class="ctrl-btn" onclick="changeSpeed(-0.5)">-</button><span id="speed-val" style="margin:0 10px">5.0</span><button class="ctrl-btn" onclick="changeSpeed(0.5)">+</button></div></div>
+            <div class="setting-row"><span>Offset (ms):</span><div><button class="ctrl-btn" onclick="changeOffset(-5)">-</button><span id="offset-val" style="margin:0 10px">0</span><button class="ctrl-btn" onclick="changeOffset(5)">+</button></div></div>
+            
+            <p style="margin: 15px 0 5px 0; font-size: 12px; color: #888;">Configure Keybinds:</p>
+            <div class="key-grid">
+                <div id="k-left" class="key-input" onclick="setupKey('left')">L: <span id="v-left">ArrowLeft</span></div>
+                <div id="k-down" class="key-input" onclick="setupKey('down')">D: <span id="v-down">ArrowDown</span></div>
+                <div id="k-up" class="key-input" onclick="setupKey('up')">U: <span id="v-up">ArrowUp</span></div>
+                <div id="k-right" class="key-input" onclick="setupKey('right')">R: <span id="v-right">ArrowRight</span></div>
+            </div>
+            <p style="color: #FFD700; font-size: 11px; margin-top: 20px;">[BACKSPACE] TO SAVE & RESTART</p>
+        </div>
+    </div>
+
+    <button id="settings-btn" onclick="toggleSettings()">⚙️ OPEN SETTINGS</button>
+
+    <script>
+        const canvas = document.getElementById("fnfGame");
+        const ctx = canvas.getContext("2d");
+        const judgmentEl = document.getElementById("judgment");
+        const comboEl = document.getElementById("combo");
+        const hpFill = document.getElementById("hp-bar-fill");
+
+        // Fixed lanes array
+        const lanes = [40, 120, 200, 280];
+        const colors = ["#C24B99", "#00FFFF", "#12FE00", "#F9393F"];
+
+        let score, misses, notesHit, combo, hp;
+        let isPaused = false, isDownscroll = false;
+        let noteSpeed = 5.0, offset = 0, notes = [];
+        let keys = { left: "ArrowLeft", down: "ArrowDown", up: "ArrowUp", right: "ArrowRight" };
+        let bindingKey = null;
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSound(f, type="sine", d=0.1) {
+            try {
+                const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+                o.type = type; o.frequency.setValueAtTime(f, audioCtx.currentTime);
+                g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + d);
+                o.connect(g); g.connect(audioCtx.destination);
+                o.start(); o.stop(audioCtx.currentTime + d);
+            } catch(e) {}
+        }
+
+        function initGame() {
+            score = 0; misses = 0; notesHit = 0; combo = 0; hp = 50;
+            notes = []; updateUI();
+        }
+
+        function toggleSettings() {
+            isPaused = !isPaused;
+            document.getElementById("settings-menu").style.display = isPaused ? "flex" : "none";
+            if (!isPaused) initGame();
+        }
+
+        function toggleScroll() {
+            isDownscroll = !isDownscroll;
+            document.getElementById("scroll-toggle").innerText = isDownscroll ? "DOWNSCROLL" : "UPSCROLL";
+        }
+
+        function changeSpeed(v) {
+            noteSpeed = Math.max(1, Math.min(15, noteSpeed + v));
+            document.getElementById('speed-val').innerText = noteSpeed.toFixed(1);
+        }
+
+        function changeOffset(v) {
+            offset += v; document.getElementById('offset-val').innerText = offset;
+        }
+
+        function setupKey(dir) {
+            bindingKey = dir;
+            document.querySelectorAll('.key-input').forEach(el => el.classList.remove('active'));
+            document.getElementById('k-' + dir).classList.add('active');
+        }
+
+        document.addEventListener("keydown", (e) => {
+            if (isPaused) {
+                if (e.key === "Backspace") toggleSettings();
+                if (bindingKey) {
+                    keys[bindingKey] = e.key;
+                    document.getElementById('v-' + bindingKey).innerText = e.key;
+                    bindingKey = null;
+                    document.querySelectorAll('.key-input').forEach(el => el.classList.remove('active'));
+                }
+            } else { checkHit(e.key); }
+        });
+
+        function checkHit(pk) {
+            let dir = Object.keys(keys).find(k => keys[k] === pk);
+            if (!dir) return;
+            let laneIdx = ["left", "down", "up", "right"].indexOf(dir);
+            let targetY = isDownscroll ? 530 : 70;
+            
+            for (let i = 0; i < notes.length; i++) {
+                let diff = Math.abs((notes[i].y + (offset * (noteSpeed/10))) - targetY);
+                if (notes[i].lane === laneIdx && diff < 60) {
+                    let judge = "BAD"; let clr = "#F9393F"; let gain = 2;
+                    if (diff < 20) { judge = "SICK!!"; clr = "#00FFFF"; gain = 8; }
+                    else if (diff < 40) { judge = "GOOD"; clr = "#12FE00"; gain = 5; }
+                    
+                    showJudgment(judge, clr);
+                    combo++; notesHit++; 
+                    score += (judge === "SICK!!" ? 500 : 200) + (combo * 10);
+                    hp = Math.min(100, hp + gain);
+                    playSound(880); updateUI();
+                    notes.splice(i, 1); return;
+                }
+            }
+        }
+
+        function showJudgment(txt, clr) {
+            judgmentEl.innerText = txt; judgmentEl.style.color = clr;
+            judgmentEl.style.opacity = 1; judgmentEl.style.transform = "scale(1.1)";
+            comboEl.innerText = combo + " COMBO"; comboEl.style.opacity = 1;
+            setTimeout(() => { judgmentEl.style.opacity = 0; judgmentEl.style.transform = "scale(0.8)"; }, 300);
+        }
+
+        function updateUI() {
+            document.getElementById("score").innerText = score;
+            document.getElementById("misses").innerText = misses;
+            hpFill.style.width = hp + "%";
+            let acc = (notesHit + misses) > 0 ? Math.round((notesHit / (notesHit + misses)) * 100) : 100;
+            document.getElementById("accuracy").innerText = acc;
+        }
+
+        function draw() {
+            if (!isPaused) {
+                ctx.fillStyle = "#000"; ctx.fillRect(0, 0, 400, 600);
+                let targetY = isDownscroll ? 530 : 70;
+                for (let i = 0; i < 4; i++) {
+                    ctx.strokeStyle = "#222"; ctx.strokeRect(lanes[i]-30, targetY-30, 60, 60);
+                }
+                if (Math.random() < 0.045) notes.push({ lane: Math.floor(Math.random() * 4), y: isDownscroll ? -20 : 620 });
+                for (let i = notes.length - 1; i >= 0; i--) {
+                    notes[i].y += isDownscroll ? noteSpeed : -noteSpeed;
+                    ctx.fillStyle = colors[notes[i].lane]; ctx.beginPath();
+                    ctx.arc(lanes[notes[i].lane], notes[i].y, 24, 0, Math.PI*2); ctx.fill();
+                    if ((isDownscroll && notes[i].y > 630) || (!isDownscroll && notes[i].y < -30)) {
+                        misses++; combo = 0; hp -= 10; comboEl.style.opacity = 0;
+                        updateUI(); playSound(150, "sawtooth", 0.15); notes.splice(i, 1);
+                        if (hp <= 0) { alert("GAME OVER! Score: " + score); initGame(); }
+                    }
+                }
+            }
+            requestAnimationFrame(draw);
+        }
+        initGame(); draw();
+    </script>
+</body>
+</html>
